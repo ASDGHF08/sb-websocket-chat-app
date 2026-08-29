@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Real-Time Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.1/stomp.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #111b21;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            padding: 24px 16px;
+        }
+
+        h2 {
+            color: #e9edef;
+            font-size: 1.1rem;
+            font-weight: 500;
+            margin-bottom: 20px;
+            letter-spacing: 0.5px;
+            opacity: 0.7;
+        }
+
+        .panels {
+            display: flex;
+            gap: 16px;
+            width: 100%;
+            max-width: 960px;
+        }
+
+        /* ── Individual chat window ── */
+        .panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-radius: 8px;
+            overflow: hidden;
+            height: 620px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+        }
+
+        /* ── Header ── */
+        .panel-header {
+            background: #202c33;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #fff;
+            flex-shrink: 0;
+        }
+        .panel1 .avatar { background: #00a884; }
+        .panel2 .avatar { background: #53bdeb; }
+
+        .header-info { flex: 1; }
+
+        .header-name {
+            color: #e9edef;
+            font-size: 0.97rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .header-status {
+            font-size: 0.74rem;
+            color: #8696a0;
+            margin-top: 1px;
+        }
+        .header-status.online { color: #00a884; }
+
+        .header-icons {
+            display: flex;
+            gap: 18px;
+            color: #aebac1;
+        }
+        .header-icons svg { cursor: pointer; }
+        .header-icons svg:hover { color: #e9edef; }
+
+        /* ── Background ── */
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 12px;
+            background-color: #0b141a;
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.6'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .messages::-webkit-scrollbar { width: 6px; }
+        .messages::-webkit-scrollbar-track { background: transparent; }
+        .messages::-webkit-scrollbar-thumb { background: #374045; border-radius: 3px; }
+
+        /* ── Message bubbles ── */
+        .msg-row {
+            display: flex;
+            margin-bottom: 2px;
+        }
+        .msg-row.right { justify-content: flex-end; }
+        .msg-row.left  { justify-content: flex-start; }
+
+        .bubble {
+            max-width: 72%;
+            padding: 6px 10px 8px 10px;
+            border-radius: 7.5px;
+            font-size: 0.875rem;
+            line-height: 1.45;
+            word-break: break-word;
+            position: relative;
+        }
+
+        /* tail for outgoing */
+        .bubble.outgoing {
+            background: #005c4b;
+            color: #e9edef;
+            border-top-right-radius: 0;
+        }
+        .bubble.outgoing::before {
+            content: '';
+            position: absolute;
+            top: 0; right: -8px;
+            width: 0; height: 0;
+            border-left: 8px solid #005c4b;
+            border-bottom: 8px solid transparent;
+        }
+
+        /* tail for incoming */
+        .bubble.incoming {
+            background: #202c33;
+            color: #e9edef;
+            border-top-left-radius: 0;
+        }
+        .bubble.incoming::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -8px;
+            width: 0; height: 0;
+            border-right: 8px solid #202c33;
+            border-bottom: 8px solid transparent;
+        }
+
+        .bubble .bname {
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-bottom: 3px;
+            color: #53bdeb;
+        }
+        .bubble.outgoing .bname { color: #00a884; }
+
+        .bubble .btext {
+            display: block;
+            color: #e9edef;
+            font-size: 0.875rem;
+        }
+
+        .bubble .meta {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            margin-top: 3px;
+        }
+
+        .bubble .btime {
+            font-size: 0.68rem;
+            color: #8696a0;
+        }
+
+        /* double tick for outgoing */
+        .tick {
+            display: inline-flex;
+            align-items: center;
+        }
+        .tick svg { color: #53bdeb; }
+
+        /* ── System message ── */
+        .system-msg {
+            text-align: center;
+            margin: 8px auto;
+            background: #182229;
+            color: #8696a0;
+            font-size: 0.72rem;
+            padding: 5px 12px;
+            border-radius: 7px;
+            max-width: 80%;
+        }
+
+        /* ── Join screen overlay ── */
+        .join-overlay {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #0b141a;
+            background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.6'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            padding: 24px;
+            gap: 16px;
+        }
+
+        .join-overlay .wa-icon {
+            width: 72px; height: 72px;
+            background: #00a884;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 8px;
+        }
+        .join-overlay .wa-icon svg { color: #fff; }
+
+        .join-overlay p {
+            color: #8696a0;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        .join-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: #2a3942;
+            border: none;
+            border-radius: 8px;
+            color: #e9edef;
+            font-size: 0.9rem;
+            outline: none;
+        }
+        .join-input::placeholder { color: #8696a0; }
+        .join-input:focus { box-shadow: 0 0 0 2px #00a884; }
+
+        .join-btn {
+            width: 100%;
+            padding: 12px;
+            background: #00a884;
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+            transition: background 0.2s;
+        }
+        .join-btn:hover { background: #017561; }
+
+        /* ── Send bar ── */
+        .send-bar {
+            background: #202c33;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+        }
+
+        .emoji-btn, .attach-btn {
+            background: none;
+            border: none;
+            color: #aebac1;
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .emoji-btn:hover, .attach-btn:hover { color: #e9edef; }
+
+        .send-input {
+            flex: 1;
+            background: #2a3942;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #e9edef;
+            font-size: 0.9rem;
+            outline: none;
+            font-family: inherit;
+        }
+        .send-input::placeholder { color: #8696a0; }
+
+        .send-btn {
+            background: #00a884;
+            border: none;
+            border-radius: 50%;
+            width: 40px; height: 40px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+        .send-btn:hover { background: #017561; }
+        .send-btn:disabled { background: #2a3942; cursor: not-allowed; }
+        .send-btn svg { color: #fff; }
+    </style>
+</head>
+<body>
+
+<h2>Real-Time Chat</h2>
+
+<div class="panels">
+
+    <!-- ══════════ USER 1 ══════════ -->
+    <div class="panel panel1">
+        <!-- Header -->
+        <div class="panel-header">
+            <div class="avatar" id="av1">?</div>
+            <div class="header-info">
+                <div class="header-name" id="hname1">User 1</div>
+                <div class="header-status" id="hstatus1">tap to join</div>
+            </div>
+            <div class="header-icons">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+            </div>
+        </div>
+
+        <!-- Join overlay -->
+        <div class="join-overlay" id="join1">
+            <div class="wa-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M20.4 3.6C18.2 1.4 15.2 0 12 0 5.4 0 0 5.4 0 12c0 2.1.6 4.2 1.6 6L0 24l6.2-1.6c1.8.9 3.7 1.4 5.8 1.4 6.6 0 12-5.4 12-12 0-3.2-1.2-6.2-3.6-8.2zM12 22c-1.8 0-3.6-.5-5.2-1.4l-.4-.2-3.6.9.9-3.5-.2-.4C2.5 15.8 2 13.9 2 12 2 6.5 6.5 2 12 2c2.7 0 5.2 1 7.1 2.9C21 6.8 22 9.3 22 12c0 5.5-4.5 10-10 10zm5.5-7.5c-.3-.1-1.7-.8-2-1-.3-.1-.5-.1-.7.1-.2.2-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.6-2.1-.2-.3 0-.4.1-.6l.4-.5c.1-.2.2-.3.2-.5 0-.2-.6-1.5-.9-2-.2-.5-.5-.4-.7-.4h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.9 1.2 2.9.8 3.4.7.5 0 1.7-.7 1.9-1.4.2-.6.2-1.2.1-1.3-.1-.1-.3-.2-.6-.3z"/></svg>
+            </div>
+            <p>Enter your name to start chatting</p>
+            <input class="join-input" id="ni1" type="text" placeholder="Your name..." maxlength="25"
+                   onkeydown="if(event.key==='Enter') join(1)"/>
+            <button class="join-btn" onclick="join(1)">Join Chat</button>
+        </div>
+
+        <!-- Messages (hidden until joined) -->
+        <div class="messages" id="msgs1" style="display:none;"></div>
+
+        <!-- Send bar (hidden until joined) -->
+        <div class="send-bar" id="sb1" style="display:none;">
+            <button class="emoji-btn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
+            </button>
+            <input class="send-input" id="mi1" type="text" placeholder="Type a message"
+                   onkeydown="if(event.key==='Enter') send(1)"/>
+            <button class="send-btn" id="sbtn1" onclick="send(1)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- ══════════ USER 2 ══════════ -->
+    <div class="panel panel2">
+        <!-- Header -->
+        <div class="panel-header">
+            <div class="avatar" id="av2" style="background:#53bdeb;">?</div>
+            <div class="header-info">
+                <div class="header-name" id="hname2">User 2</div>
+                <div class="header-status" id="hstatus2">tap to join</div>
+            </div>
+            <div class="header-icons">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+            </div>
+        </div>
+
+        <!-- Join overlay -->
+        <div class="join-overlay" id="join2">
+            <div class="wa-icon" style="background:#53bdeb;">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M20.4 3.6C18.2 1.4 15.2 0 12 0 5.4 0 0 5.4 0 12c0 2.1.6 4.2 1.6 6L0 24l6.2-1.6c1.8.9 3.7 1.4 5.8 1.4 6.6 0 12-5.4 12-12 0-3.2-1.2-6.2-3.6-8.2zM12 22c-1.8 0-3.6-.5-5.2-1.4l-.4-.2-3.6.9.9-3.5-.2-.4C2.5 15.8 2 13.9 2 12 2 6.5 6.5 2 12 2c2.7 0 5.2 1 7.1 2.9C21 6.8 22 9.3 22 12c0 5.5-4.5 10-10 10zm5.5-7.5c-.3-.1-1.7-.8-2-1-.3-.1-.5-.1-.7.1-.2.2-.8 1-.9 1.2-.2.2-.3.2-.6.1-.3-.1-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.6-2.1-.2-.3 0-.4.1-.6l.4-.5c.1-.2.2-.3.2-.5 0-.2-.6-1.5-.9-2-.2-.5-.5-.4-.7-.4h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 4.9 4.3 2.9 1.2 2.9.8 3.4.7.5 0 1.7-.7 1.9-1.4.2-.6.2-1.2.1-1.3-.1-.1-.3-.2-.6-.3z"/></svg>
+            </div>
+            <p>Enter your name to start chatting</p>
+            <input class="join-input" id="ni2" type="text" placeholder="Your name..." maxlength="25"
+                   onkeydown="if(event.key==='Enter') join(2)"/>
+            <button class="join-btn" onclick="join(2)" style="background:#53bdeb;">Join Chat</button>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages" id="msgs2" style="display:none;"></div>
+
+        <!-- Send bar -->
+        <div class="send-bar" id="sb2" style="display:none;">
+            <button class="emoji-btn">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
+            </button>
+            <input class="send-input" id="mi2" type="text" placeholder="Type a message"
+                   onkeydown="if(event.key==='Enter') send(2)"/>
+            <button class="send-btn" id="sbtn2" onclick="send(2)" style="background:#53bdeb;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    var stomp1 = null, stomp2 = null;
+    var name1 = '', name2 = '';
+
+    function nowTime() {
+        var d = new Date();
+        var h = d.getHours(), m = d.getMinutes();
+        return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+    }
+
+    function initials(name) {
+        return name ? name.charAt(0).toUpperCase() : '?';
+    }
+
+    function join(user) {
+        var nameInput = document.getElementById('ni' + user);
+        var name = nameInput.value.trim();
+        if (!name) {
+            nameInput.style.boxShadow = '0 0 0 2px #ef4444';
+            nameInput.focus();
+            return;
+        }
+
+        if (user === 1) name1 = name; else name2 = name;
+
+        // Update header
+        document.getElementById('hname' + user).textContent = name;
+        document.getElementById('av' + user).textContent = initials(name);
+        document.getElementById('hstatus' + user).textContent = 'connecting...';
+
+        var socket = new SockJS('/chat');
+        var client = Stomp.over(socket);
+        client.debug = null;
+
+        if (user === 1) stomp1 = client; else stomp2 = client;
+
+        client.connect({}, function(frame) {
+            // Switch to chat view
+            document.getElementById('join' + user).style.display = 'none';
+            document.getElementById('msgs' + user).style.display = 'flex';
+            document.getElementById('sb' + user).style.display = 'flex';
+            document.getElementById('hstatus' + user).textContent = 'online';
+            document.getElementById('hstatus' + user).classList.add('online');
+            document.getElementById('mi' + user).focus();
+
+            addSystem(user, 'Messages are end-to-end encrypted');
+
+            client.subscribe('/topic/messages', function(frame) {
+                var data = JSON.parse(frame.body);
+                var myName = (user === 1) ? name1 : name2;
+                addMessage(user, data.sender, data.content, data.sender === myName);
+            });
+        }, function() {
+            document.getElementById('hstatus' + user).textContent = 'connection failed';
+        });
+    }
+
+    function send(user) {
+        var input = document.getElementById('mi' + user);
+        var text = input.value.trim();
+        if (!text) return;
+        var client = (user === 1) ? stomp1 : stomp2;
+        var myName = (user === 1) ? name1 : name2;
+        if (!client) return;
+        client.send('/app/sendMessage', {}, JSON.stringify({ sender: myName, content: text }));
+        input.value = '';
+        input.focus();
+    }
+
+    function addMessage(panelUser, sender, text, isOwn) {
+        var container = document.getElementById('msgs' + panelUser);
+
+        var row = document.createElement('div');
+        row.className = 'msg-row ' + (isOwn ? 'right' : 'left');
+
+        var bubble = document.createElement('div');
+        bubble.className = 'bubble ' + (isOwn ? 'outgoing' : 'incoming');
+
+        // Sender name (only for incoming)
+        if (!isOwn) {
+            var nameEl = document.createElement('div');
+            nameEl.className = 'bname';
+            nameEl.textContent = sender;
+            bubble.appendChild(nameEl);
+        }
+
+        // Message text
+        var textEl = document.createElement('div');
+        textEl.className = 'btext';
+        textEl.textContent = text || '';
+        bubble.appendChild(textEl);
+
+        // Time + tick
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+
+        var timeEl = document.createElement('span');
+        timeEl.className = 'btime';
+        timeEl.textContent = nowTime();
+        meta.appendChild(timeEl);
+
+        if (isOwn) {
+            var tick = document.createElement('span');
+            tick.className = 'tick';
+            tick.innerHTML = '<svg width="16" height="11" viewBox="0 0 16 11" fill="currentColor" style="color:#53bdeb"><path d="M15.01.99l-1.06-1.06L5.19 8.69 2.06 5.55 1 6.61l4.19 4.19zM.98 6.61L5.17 10.8l1.06-1.06L2.04 5.55z"/></svg>';
+            meta.appendChild(tick);
+        }
+
+        bubble.appendChild(meta);
+        row.appendChild(bubble);
+        container.appendChild(row);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function addSystem(panelUser, text) {
+        var container = document.getElementById('msgs' + panelUser);
+        var div = document.createElement('div');
+        div.className = 'system-msg';
+        div.innerHTML = '&#x1F512; ' + text;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+    }
+</script>
+</body>
+</html>
